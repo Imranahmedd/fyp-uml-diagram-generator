@@ -19,16 +19,25 @@ from uml_extractors import (
     DeploymentDiagramExtractor
 )
 from uml_generator import DiagramGenerator
-
+from pyngrok import ngrok
+from dotenv import load_dotenv
+load_dotenv()
 
 
 app = Flask(__name__)
 app.secret_key = "your-very-secret-key-12345"
+
+# Session cookie configuration (will be adjusted based on USE_NGROK at startup)
+app.config['SESSION_COOKIE_HTTPONLY'] = True    # Prevent XSS attacks
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+
 CORS(app, 
      resources={r"/*": {
-         "origins": ["http://localhost:3000"],
+         "origins": ["http://localhost:3000","https://roslyn-starrier-anne.ngrok-free.dev",
+             "https://uml-diagram-zeta.vercel.app"],
          "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         "allow_headers": ["Content-Type", "Authorization"],
+         "allow_headers": ["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
+         "expose_headers": ["Content-Type", "Authorization"],
          "supports_credentials": True,
          "max_age": 3600
      }}
@@ -80,8 +89,8 @@ except OperationalError as e:
 # Directories and Model
 PUML_DIR = "generated_puml"
 STATIC_DIR = "static"
-BEHAVIORAL_MODEL_PATH = "./behavioral_uml_model/model-best"
-ARCHITECTURE_MODEL_PATH = "./architecture_uml_model/model-best"
+BEHAVIORAL_MODEL_PATH = "./behavioral_uml_model/behavioral_uml_model/model-best"
+ARCHITECTURE_MODEL_PATH = "./architecture_uml_model/architecture_uml_model/model-best"
 
 # Load Standard Model (Syntax/Parsing)
 try:
@@ -159,10 +168,56 @@ def index():
 def serve_static(filename):
     """Serve static files (generated diagrams)."""
     logger.debug(f"Serving static file: {filename}")
-    return send_from_directory(app.config['STATIC_DIR'], filename)
+    full_path = os.path.join(app.config['STATIC_DIR'], filename)
+    logger.debug(f"Full path: {full_path}")
+    logger.debug(f"File exists: {os.path.exists(full_path)}")
+    
+    if not os.path.exists(full_path):
+        logger.error(f"File not found: {full_path}")
+        return jsonify({'error': 'File not found'}), 404
+    
+    response = send_from_directory(app.config['STATIC_DIR'], filename)
+    # Add CORS headers for cross-origin image loading (no credentials needed)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    logger.debug(f"Serving file with CORS headers: {response.headers.get('Access-Control-Allow-Origin')}")
+    return response
 
 # Main
 if __name__ == "__main__":
     from waitress import serve
-    print(f"Starting Production Server (Waitress) on http://localhost:5000...")
-    serve(app, host='localhost', port=5000)
+
+    USE_NGROK = os.getenv('USE_NGROK', 'false').lower() == 'true'
+    PORT = int(os.getenv('PORT', 5000))
+    
+    # Adjust cookie security based on ngrok usage
+    if USE_NGROK:
+        # For ngrok (HTTPS), require secure cookies
+        app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+        app.config['SESSION_COOKIE_SECURE'] = True
+        logger.info("Ngrok mode: Secure cross-origin cookies enabled")
+    else:
+        # For localhost development, relax cookie restrictions
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+        app.config['SESSION_COOKIE_SECURE'] = False
+        logger.info("Local mode: Standard cookie settings")
+    
+    if USE_NGROK:
+        try:
+            ngrok_token = os.getenv('NGROK_AUTH_TOKEN')
+            if ngrok_token:
+                ngrok.set_auth_token(ngrok_token)
+            
+            try:
+                ngrok.kill()
+            except:
+                pass
+            
+            ngrok_domain = os.getenv('NGROK_DOMAIN')
+            public_url = ngrok.connect(PORT, domain=ngrok_domain) if ngrok_domain else ngrok.connect(PORT)
+            logger.info(f"Ngrok tunnel: {public_url}")
+        except Exception as e:
+            logger.error(f"Ngrok failed: {e}")
+    
+    logger.info(f"Starting Waitress server on 0.0.0.0:{PORT}")
+    serve(app, host='0.0.0.0', port=PORT)

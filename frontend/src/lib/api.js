@@ -2,9 +2,10 @@ import axios from 'axios'
 
 // Create an axios instance with default config
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
   headers: {
     'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': '69420', // Bypass ngrok browser warning
   },
   withCredentials: true, // Important for handling session cookies/CORS
 })
@@ -79,6 +80,19 @@ export const projectAPI = {
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
+    }
+  },
+
+  // Fetch diagram image as blob to bypass ngrok header issues
+  getDiagramImage: async (filename) => {
+    try {
+      const response = await api.get(`/static/${filename}`, {
+        responseType: 'blob'
+      })
+      return URL.createObjectURL(response.data)
+    } catch (error) {
+      console.error('Error fetching diagram image:', error)
+      throw error
     }
   }
 }

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Image from 'next/image'
 import { projectAPI } from '@/lib/api'
 import { useProjectStore } from '@/store/projects'
 import toast, { Toaster } from 'react-hot-toast'
@@ -27,8 +26,19 @@ export default function ProjectPage() {
   const [diagramType, setDiagramType] = useState('class')
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
-  const [diagramUrl, setDiagramUrl] = useState(null)
+  const [diagramUrl, setDiagramUrl] = useState(null) // Blob URL for display
   const [isClient, setIsClient] = useState(false)
+
+  // Helper function to load diagram image via axios (with ngrok bypass header)
+  const loadDiagramImage = async (filename) => {
+    try {
+      const blobUrl = await projectAPI.getDiagramImage(filename)
+      setDiagramUrl(blobUrl)
+    } catch (error) {
+      console.error('Failed to load diagram:', error)
+      setDiagramUrl(null)
+    }
+  }
 
   // Ensure client-side rendering
   useEffect(() => {
@@ -43,20 +53,15 @@ export default function ProjectPage() {
         setCurrentProject(data)
         setStories(data.stories_text || '')
 
-        // Get backend URL
-        const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-
         // Restore diagram type from localStorage
         const savedDiagramType = localStorage.getItem(`diagram_type_${params.id}`)
         if (savedDiagramType) {
           setDiagramType(savedDiagramType)
-          // Build diagram URL with saved diagram type
-          const timestamp = new Date().getTime()
-          setDiagramUrl(`${backendUrl}/static/${savedDiagramType}_${data.ProjectID}.png?t=${timestamp}`)
+          // Load diagram with saved diagram type
+          await loadDiagramImage(`${savedDiagramType}_${data.ProjectID}.png?t=${Date.now()}`)
         } else {
-          // Build diagram URL with default diagram type
-          const timestamp = new Date().getTime()
-          setDiagramUrl(`${backendUrl}/static/class_${data.ProjectID}.png?t=${timestamp}`)
+          // Load diagram with default diagram type
+          await loadDiagramImage(`class_${data.ProjectID}.png?t=${Date.now()}`)
         }
       } catch (error) {
         console.error('Error loading project:', error)
@@ -83,11 +88,9 @@ export default function ProjectPage() {
     setDiagramType(newType)
     localStorage.setItem(`diagram_type_${params.id}`, newType)
 
-    // Update diagram URL
+    // Load new diagram image
     if (project?.ProjectID) {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-      const timestamp = new Date().getTime()
-      setDiagramUrl(`${backendUrl}/static/${newType}_${project.ProjectID}.png?t=${timestamp}`)
+      loadDiagramImage(`${newType}_${project.ProjectID}.png?t=${Date.now()}`)
     }
   }
 
@@ -119,10 +122,8 @@ export default function ProjectPage() {
       if (response.success) {
         toast.success('Diagram updated successfully!')
 
-        // Update diagram URL with new timestamp to force refresh
-        const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-        const timestamp = new Date().getTime()
-        setDiagramUrl(`${backendUrl}/static/${diagramType}_${params.id}.png?t=${timestamp}`)
+        // Reload diagram image with new timestamp
+        await loadDiagramImage(`${diagramType}_${params.id}.png?t=${Date.now()}`)
       } else {
         // Handle architecture context missing error
         if (response.error_code === 'ARCH_CONTEXT_MISSING') {
@@ -325,16 +326,15 @@ export default function ProjectPage() {
               <div className="bg-white border-2 border-border-color rounded-lg overflow-hidden flex items-center justify-center min-h-96">
                 {diagramUrl ? (
                   <div className="w-full relative">
-                    <Image
+                    <img
                       src={diagramUrl}
                       alt="Generated UML Diagram"
-                      width={800}
-                      height={600}
                       className="w-full h-auto"
-                      unoptimized
-                      onError={() => {
+                      onError={(e) => {
+                        console.error('Image display error')
                         setDiagramUrl(null)
                       }}
+                      onLoad={() => console.log('Image rendered successfully')}
                     />
                   </div>
                 ) : (
